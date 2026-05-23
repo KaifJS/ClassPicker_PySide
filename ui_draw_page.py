@@ -1,6 +1,6 @@
 # ui_draw_page.py
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QSpinBox, QCheckBox, QFrame, QMessageBox
-from PySide6.QtCore import Qt, QTimer, QElapsedTimer
+from PySide6.QtCore import Qt, QTimer
 from ui_components import AnimatedButton
 import random
 import os
@@ -16,7 +16,6 @@ class DrawPage(QWidget):
         self.animation_timer.timeout.connect(self._update_animation_frame)
         self.anim_step = 0
         self.anim_results = []
-        self.anim_total_frames = 0
         self.setup_ui()
         self.update_status()
         self.repeat_checkbox.setChecked(self.core.allow_repeat)
@@ -151,12 +150,11 @@ class DrawPage(QWidget):
             QMessageBox.warning(self, "警告", "请先在设置中添加学生名单")
             return
         count = self.count_spin.value()
-        selected = self.core.draw(count)
+        selected = self.core.draw(count, parent_window=self)
         if not selected:
-            QMessageBox.warning(self, "错误", "抽取失败，可能是剩余人数不足")
+            QMessageBox.information(self, "提示", "抽取失败，人数不足且用户取消重置")
             return
-
-        # 判断是否需要播放动画
+        # 根据设置决定是否播放动画
         if self.settings.get('animation_enabled', False):
             self._play_animation(selected)
         else:
@@ -165,26 +163,22 @@ class DrawPage(QWidget):
             self.update_status()
 
     def _play_animation(self, results):
-        """根据设置播放浮动动画"""
-        duration = self.settings.get('animation_duration', 0.5)      # 秒
-        interval = self.settings.get('animation_interval', 30)       # 毫秒
+        duration = self.settings.get('animation_duration', 0.5)
+        interval = self.settings.get('animation_interval', 30)
         total_frames = max(1, int(duration * 1000 / interval))
         self.anim_results = results
         self.anim_current_frame = 0
         self.anim_total_frames = total_frames
-        if hasattr(self, 'animation_timer') and self.animation_timer.isActive():
+        if self.animation_timer.isActive():
             self.animation_timer.stop()
         self.animation_timer.start(interval)
 
     def _update_animation_frame(self):
-        """动画每一帧"""
         if self.anim_current_frame < self.anim_total_frames:
-            # 生成随机数字（模拟滚动效果）
             fake = [str(random.randint(1, 999)) for _ in self.anim_results]
             self.result_display.setText(" ".join(fake))
             self.anim_current_frame += 1
         else:
-            # 动画结束，显示真实结果
             self.animation_timer.stop()
             self.result_display.setText(" ".join(self.anim_results))
             self.update_status()
@@ -212,7 +206,6 @@ class DrawPage(QWidget):
             QMessageBox.critical(self, "错误", str(e))
 
     def sync_from_core(self):
-        """加载存档后同步界面状态，不重新生成随机排列"""
         self.repeat_checkbox.setChecked(self.core.allow_repeat)
         self.exclude_checkbox.setChecked(self.core.exclude_after_draw)
         self.on_repeat_mode_changed(self.core.allow_repeat)

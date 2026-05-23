@@ -3,12 +3,12 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QStackedWidget,
     QLabel, QPushButton, QFileDialog, QColorDialog, QScrollArea,
     QGridLayout, QLineEdit, QSlider, QPlainTextEdit, QMessageBox,
-    QListWidgetItem, QInputDialog, QTableWidget, QTableWidgetItem, QCheckBox
+    QListWidgetItem, QInputDialog, QTableWidget, QTableWidgetItem, QCheckBox, QComboBox
 )
 from PySide6.QtCore import Qt
 from ui_components import CardWidget
 import os, json, subprocess, sys
-from win32com.client import Dispatch  # 用于创建快捷方式
+from win32com.client import Dispatch
 
 class SettingsPage(QWidget):
     def __init__(self, core, settings, save_callback, refresh_draw_callback, draw_page):
@@ -173,7 +173,7 @@ class StudentManagerPanel(QWidget):
             QMessageBox.warning(self, "警告", "请先点击卡片选中要编辑的成员")
 
 
-# ---------- 字体设置面板 ----------
+# ---------- 字体设置面板（修复版：下拉选择多种字体） ----------
 class FontSettingsPanel(QWidget):
     def __init__(self, settings, apply_callback):
         super().__init__()
@@ -184,6 +184,7 @@ class FontSettingsPanel(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
 
+        # 字体大小
         size_layout = QHBoxLayout()
         size_layout.addWidget(QLabel("字体大小:"))
         self.size_slider = QSlider(Qt.Horizontal)
@@ -193,22 +194,39 @@ class FontSettingsPanel(QWidget):
         size_layout.addWidget(self.size_slider)
         layout.addLayout(size_layout)
 
+        # 字体族（下拉选择 + 可手动输入）
         family_layout = QHBoxLayout()
         family_layout.addWidget(QLabel("字体:"))
-        self.family_edit = QLineEdit(self.settings.get('result_font_family', 'Microsoft YaHei'))
-        self.family_edit.textChanged.connect(self.preview)
-        family_layout.addWidget(self.family_edit)
+        self.family_combo = QComboBox()
+        common_fonts = [
+            'Microsoft YaHei', 'SimHei', 'SimSun', 'KaiTi', 'FangSong',
+            'Arial', 'Times New Roman', 'Consolas', 'Courier New',
+            'Segoe UI', 'Verdana', 'Tahoma', '微软雅黑', '黑体', '宋体', '楷体', '仿宋'
+        ]
+        self.family_combo.addItems(common_fonts)
+        self.family_combo.setEditable(True)
+        current_family = self.settings.get('result_font_family', 'Microsoft YaHei')
+        if current_family in common_fonts:
+            self.family_combo.setCurrentText(current_family)
+        else:
+            self.family_combo.addItem(current_family)
+            self.family_combo.setCurrentText(current_family)
+        self.family_combo.currentTextChanged.connect(self.preview)
+        family_layout.addWidget(self.family_combo)
         layout.addLayout(family_layout)
 
+        # 颜色选择
         color_btn = QPushButton("选择颜色")
         color_btn.clicked.connect(self.choose_color)
         layout.addWidget(color_btn)
 
+        # 预览
         self.preview_label = QLabel("预览: 01.(张三)")
         self.preview_label.setAlignment(Qt.AlignCenter)
         self.preview_label.setStyleSheet("padding: 20px; background-color: #1e1f2c; border-radius: 12px;")
         layout.addWidget(self.preview_label)
 
+        # 应用按钮
         apply_btn = QPushButton("应用并保存")
         apply_btn.clicked.connect(self.apply)
         layout.addWidget(apply_btn)
@@ -216,7 +234,7 @@ class FontSettingsPanel(QWidget):
         self.preview()
 
     def preview(self):
-        family = self.family_edit.text()
+        family = self.family_combo.currentText()
         size = self.size_slider.value()
         color = self.settings.get('result_font_color', '#ffffff')
         self.preview_label.setStyleSheet(f"font-family: {family}; font-size: {size}px; color: {color}; padding: 20px; background-color: #1e1f2c; border-radius: 12px;")
@@ -229,7 +247,7 @@ class FontSettingsPanel(QWidget):
 
     def apply(self):
         self.settings['result_font_size'] = self.size_slider.value()
-        self.settings['result_font_family'] = self.family_edit.text()
+        self.settings['result_font_family'] = self.family_combo.currentText()
         self.apply_callback()
         QMessageBox.information(self, "成功", "字体设置已保存并应用")
 
@@ -254,7 +272,7 @@ class AnimationSettingsPanel(QWidget):
         duration_layout = QHBoxLayout()
         duration_layout.addWidget(QLabel("动画时长 (秒):"))
         self.duration_slider = QSlider(Qt.Horizontal)
-        self.duration_slider.setRange(2, 20)  # 0.2 ~ 2.0 秒
+        self.duration_slider.setRange(2, 20)
         self.duration_slider.setTickInterval(2)
         self.duration_slider.valueChanged.connect(self.on_value_changed)
         self.duration_label = QLabel("0.5 s")
@@ -436,7 +454,7 @@ class StatisticsPanel(QWidget):
         self.text_area.setPlainText(info)
 
 
-# ---------- 开机自启动面板（使用 win32com，稳定可靠） ----------
+# ---------- 开机自启动面板（使用 win32com，稳定） ----------
 class AutoStartPanel(QWidget):
     def __init__(self):
         super().__init__()

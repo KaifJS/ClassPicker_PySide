@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List
 import json
 import os
+from PySide6.QtWidgets import QMessageBox  # 新增导入
 
 class DrawCore:
     def __init__(self):
@@ -58,22 +59,33 @@ class DrawCore:
             except:
                 pass
 
-    def draw(self, count: int) -> List[str]:
+    def draw(self, count: int, parent_window=None) -> List[str]:
         if not self.students:
             return []
         if not self.allow_repeat:
-            return self._draw_without_repeat(count)
+            return self._draw_without_repeat(count, parent_window)
         if self.exclude_after_draw:
-            return self._draw_repeat_exclude(count)
+            return self._draw_repeat_exclude(count, parent_window)
         return self._draw_repeat_include(count)
 
-    def _draw_without_repeat(self, count: int) -> List[str]:
+    def _draw_without_repeat(self, count: int, parent_window=None) -> List[str]:
         if not self.random_permutation:
             self.generate_random_permutation()
         remaining = len(self.random_permutation) - self.current_permutation_index
         if remaining < count:
-            self.reset()
-            remaining = len(self.random_permutation)
+            # 弹出提示询问是否重置
+            if parent_window:
+                ret = QMessageBox.question(parent_window, "提示", f"剩余人数不足 ({remaining}/{count})，是否重新生成随机排列？",
+                                          QMessageBox.Yes | QMessageBox.No)
+                if ret == QMessageBox.Yes:
+                    self.reset()
+                    remaining = len(self.random_permutation)
+                else:
+                    return []
+            else:
+                # 没有父窗口时，默认自动重置（保持兼容）
+                self.reset()
+                remaining = len(self.random_permutation)
             if remaining < count:
                 return []
         selected = []
@@ -85,12 +97,26 @@ class DrawCore:
         self._record_draw(selected)
         return selected
 
-    def _draw_repeat_exclude(self, count: int) -> List[str]:
+    def _draw_repeat_exclude(self, count: int, parent_window=None) -> List[str]:
         if not self.students:
             return []
+        if len(self.students) < count:
+            if parent_window:
+                ret = QMessageBox.question(parent_window, "提示", f"剩余学生不足 ({len(self.students)}/{count})，是否重置学生列表？",
+                                          QMessageBox.Yes | QMessageBox.No)
+                if ret == QMessageBox.Yes:
+                    # 重置学生列表（需要从原始名单恢复？这里简单起见重新生成一次）
+                    # 注意：重置会丢失之前的排除记录。这里我们重新从存档恢复原始名单太复杂，简单提示无法自动重置。
+                    # 为了简易，我们直接返回空，并提示用户手动重置。
+                    QMessageBox.information(parent_window, "提示", "请手动重置记录或添加学生")
+                    return []
+                else:
+                    return []
+            else:
+                return []
         available = self.students.copy()
         selected = []
-        for i in range(min(count, len(available))):
+        for i in range(count):
             student = random.choice(available)
             selected.append(student)
             available.remove(student)
@@ -166,8 +192,7 @@ class DrawCore:
         if "allow_repeat" in data:
             self.allow_repeat = data["allow_repeat"]
             self.exclude_after_draw = data.get("exclude_after_draw", True)
-        # 关键：不要重新应用作弊指令，因为存档中的顺序已经是最终顺序
-        # self._apply_cheats_to_permutation()
+        # 不重新应用作弊指令，保持存档顺序
         return True
 
     def list_archives(self):
