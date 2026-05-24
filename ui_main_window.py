@@ -1,12 +1,21 @@
 # ui_main_window.py
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QLabel, QPushButton, QFrame
+import os
+import sys
+import json
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                               QStackedWidget, QLabel, QPushButton, QFrame,
+                               QMenuBar, QMenu, QDialog, QTextBrowser, QMessageBox)
 from PySide6.QtCore import Qt
 from ui_draw_page import DrawPage
 from ui_settings_page import SettingsPage
 from core import DrawCore
 from music import MusicPlayer
-import json
-import os
+
+try:
+    from win32com.client import Dispatch
+    HAS_WIN32COM = True
+except ImportError:
+    HAS_WIN32COM = False
 
 class MainWindow(QMainWindow):
     def __init__(self, default_students=None):
@@ -20,8 +29,35 @@ class MainWindow(QMainWindow):
         self.music.file = self.settings.get('music_file', '')
         self.music.volume = self.settings.get('music_volume', 0.5)
         self.setup_ui()
+        self.setup_menu_bar()          # 新增：创建菜单栏
         self.setup_connections()
+        self._ensure_desktop_shortcut()
 
+    # ---------- 桌面快捷方式（绕过冰点还原） ----------
+    def _ensure_desktop_shortcut(self):
+        if not HAS_WIN32COM:
+            return
+        try:
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+            if not os.path.exists(desktop):
+                desktop = os.path.join(os.path.expanduser("~"), "桌面")
+            shortcut_path = os.path.join(desktop, "智能抽号系统.lnk")
+            if getattr(sys, 'frozen', False):
+                target = sys.executable
+            else:
+                target = os.path.abspath(sys.argv[0])
+            if os.path.exists(shortcut_path):
+                os.remove(shortcut_path)
+            shell = Dispatch("WScript.Shell")
+            shortcut = shell.CreateShortCut(shortcut_path)
+            shortcut.TargetPath = target
+            shortcut.WorkingDirectory = os.path.dirname(target)
+            shortcut.IconLocation = target
+            shortcut.Save()
+        except Exception:
+            pass
+
+    # ---------- 设置加载/保存 ----------
     def load_settings(self):
         default = {
             'result_font_size': 36,
@@ -31,7 +67,10 @@ class MainWindow(QMainWindow):
             'music_enabled': False,
             'music_volume': 0.5,
             'music_file': '',
-            'theme': 'dark'
+            'theme': 'dark',
+            'animation_enabled': False,
+            'animation_duration': 0.5,
+            'animation_interval': 30,
         }
         if os.path.exists('app_settings.json'):
             try:
@@ -49,6 +88,47 @@ class MainWindow(QMainWindow):
         except:
             pass
 
+    # ---------- 菜单栏 ----------
+    def setup_menu_bar(self):
+        menubar = self.menuBar()
+        # 帮助菜单
+        help_menu = menubar.addMenu("帮助")
+        about_action = help_menu.addAction("关于")
+        about_action.triggered.connect(self.show_about)
+        changelog_action = help_menu.addAction("更新日志")
+        changelog_action.triggered.connect(self.show_changelog)
+
+    def show_about(self):
+        QMessageBox.about(self, "关于智能抽号系统",
+                          "<h3>智能抽号系统 v3.0.1</h3>"
+                          "<p>基于 PySide6 开发的课堂抽号工具</p>"
+                          "<p>作者：开方居士</p>"
+                          "<p>项目地址：<a href='https://github.com/你的用户名/random-draw-pyside6'>GitHub</a></p>")
+
+    def show_changelog(self):
+        """读取外部 CHANGELOG.md 文件并显示"""
+        # 确定文件路径（支持打包后的 exe）
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS   # PyInstaller 临时目录
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        changelog_path = os.path.join(base_path, "CHANGELOG.md")
+        dialog = QDialog(self)
+        dialog.setWindowTitle("更新日志")
+        dialog.resize(700, 500)
+        layout = QVBoxLayout(dialog)
+        text_browser = QTextBrowser()
+        if os.path.exists(changelog_path):
+            with open(changelog_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # 简单的 Markdown 支持（标题、列表等）
+            text_browser.setMarkdown(content)
+        else:
+            text_browser.setPlainText("未找到 CHANGELOG.md 文件，请从项目主页查看更新记录。")
+        layout.addWidget(text_browser)
+        dialog.exec_()
+
+    # ---------- UI 布局（与之前相同） ----------
     def setup_ui(self):
         self.setWindowTitle("智能抽号系统 v3.0 - PySide6 完全版")
         self.resize(1300, 850)
@@ -60,7 +140,6 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 左侧导航栏
         nav_bar = QFrame()
         nav_bar.setFixedWidth(200)
         nav_bar.setObjectName("navBar")
@@ -96,10 +175,8 @@ class MainWindow(QMainWindow):
             self.nav_btns.append(btn)
         nav_layout.addStretch()
 
-        # 右侧堆叠区
         self.stacked = QStackedWidget()
         self.draw_page = DrawPage(self.core, self.music, self.settings, self.save_settings)
-        # 修改：增加最后一个参数 self.draw_page，以便设置页面可以访问抽号页面
         self.settings_page = SettingsPage(self.core, self.settings, self.save_settings, self.draw_page.update_status, self.draw_page)
         self.stacked.addWidget(self.draw_page)
         self.stacked.addWidget(self.settings_page)
@@ -107,7 +184,6 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(nav_bar)
         main_layout.addWidget(self.stacked, 1)
 
-        # 初始选中抽号页
         self.stacked.setCurrentIndex(0)
         self.nav_btns[0].setStyleSheet("background-color: #3b3c4e; color: white; border-radius: 12px;")
 
