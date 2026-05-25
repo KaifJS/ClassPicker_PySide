@@ -5,10 +5,11 @@ from PySide6.QtWidgets import (
     QGridLayout, QLineEdit, QSlider, QPlainTextEdit, QMessageBox,
     QListWidgetItem, QInputDialog, QTableWidget, QTableWidgetItem, QCheckBox, QComboBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from ui_components import CardWidget
 import os, json, subprocess, sys
 from win32com.client import Dispatch
+import pygame
 
 class SettingsPage(QWidget):
     def __init__(self, core, settings, save_callback, refresh_draw_callback, draw_page):
@@ -54,6 +55,9 @@ class SettingsPage(QWidget):
         self.stat_panel = StatisticsPanel(self.core)
         self.add_menu_item("📊 统计信息", self.stat_panel)
 
+        self.entertainment_panel = EntertainmentPanel(self.core, self.draw_page.music, self.settings, self.save_callback)
+        self.add_menu_item("🎵 娱乐功能", self.entertainment_panel)
+
         self.auto_panel = AutoStartPanel()
         self.add_menu_item("⚡ 开机自启动", self.auto_panel)
 
@@ -71,6 +75,8 @@ class SettingsPage(QWidget):
     def on_font_changed(self):
         self.save_callback()
         self.refresh_draw_callback()
+        # 立即应用字体设置到抽号页面
+        self.draw_page.apply_font_settings()
 
     def on_animation_changed(self):
         self.save_callback()
@@ -173,7 +179,7 @@ class StudentManagerPanel(QWidget):
             QMessageBox.warning(self, "警告", "请先点击卡片选中要编辑的成员")
 
 
-# ---------- 字体设置面板（修复版：下拉选择多种字体） ----------
+# ---------- 字体设置面板 ----------
 class FontSettingsPanel(QWidget):
     def __init__(self, settings, apply_callback):
         super().__init__()
@@ -184,7 +190,6 @@ class FontSettingsPanel(QWidget):
     def setup_ui(self):
         layout = QVBoxLayout(self)
 
-        # 字体大小
         size_layout = QHBoxLayout()
         size_layout.addWidget(QLabel("字体大小:"))
         self.size_slider = QSlider(Qt.Horizontal)
@@ -194,7 +199,6 @@ class FontSettingsPanel(QWidget):
         size_layout.addWidget(self.size_slider)
         layout.addLayout(size_layout)
 
-        # 字体族（下拉选择 + 可手动输入）
         family_layout = QHBoxLayout()
         family_layout.addWidget(QLabel("字体:"))
         self.family_combo = QComboBox()
@@ -215,18 +219,15 @@ class FontSettingsPanel(QWidget):
         family_layout.addWidget(self.family_combo)
         layout.addLayout(family_layout)
 
-        # 颜色选择
         color_btn = QPushButton("选择颜色")
         color_btn.clicked.connect(self.choose_color)
         layout.addWidget(color_btn)
 
-        # 预览
         self.preview_label = QLabel("预览: 01.(张三)")
         self.preview_label.setAlignment(Qt.AlignCenter)
         self.preview_label.setStyleSheet("padding: 20px; background-color: #1e1f2c; border-radius: 12px;")
         layout.addWidget(self.preview_label)
 
-        # 应用按钮
         apply_btn = QPushButton("应用并保存")
         apply_btn.clicked.connect(self.apply)
         layout.addWidget(apply_btn)
@@ -454,7 +455,136 @@ class StatisticsPanel(QWidget):
         self.text_area.setPlainText(info)
 
 
-# ---------- 开机自启动面板（使用 win32com，稳定） ----------
+# ---------- 娱乐功能面板 ----------
+class EntertainmentPanel(QWidget):
+    def __init__(self, core, music, settings, save_callback):
+        super().__init__()
+        self.core = core
+        self.music = music
+        self.settings = settings
+        self.save_callback = save_callback
+        self.setup_ui()
+        self.load_settings()
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._check_music_state)
+        self.timer.start(500)
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(QLabel("音乐文件夹:"))
+        self.folder_path = QLineEdit()
+        self.folder_path.setReadOnly(True)
+        self.folder_path.setPlaceholderText("未选择")
+        folder_btn = QPushButton("浏览")
+        folder_btn.clicked.connect(self.select_folder)
+        folder_layout.addWidget(self.folder_path)
+        folder_layout.addWidget(folder_btn)
+        layout.addLayout(folder_layout)
+
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("播放模式:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["顺序播放", "随机播放", "单曲播放", "单曲循环"])
+        self.mode_combo.currentIndexChanged.connect(self.on_mode_changed)
+        mode_layout.addWidget(self.mode_combo)
+        layout.addLayout(mode_layout)
+
+        volume_layout = QHBoxLayout()
+        volume_layout.addWidget(QLabel("音量:"))
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(int(self.music.volume * 100))
+        self.volume_slider.valueChanged.connect(self.on_volume_changed)
+        volume_layout.addWidget(self.volume_slider)
+        self.volume_label = QLabel(f"{int(self.music.volume*100)}%")
+        volume_layout.addWidget(self.volume_label)
+        layout.addLayout(volume_layout)
+
+        btn_layout = QHBoxLayout()
+        self.prev_btn = QPushButton("⏮ 上一首")
+        self.play_btn = QPushButton("▶ 播放")
+        self.pause_btn = QPushButton("⏸ 暂停")
+        self.stop_btn = QPushButton("⏹ 停止")
+        self.next_btn = QPushButton("⏭ 下一首")
+        self.prev_btn.clicked.connect(self.music.previous)
+        self.play_btn.clicked.connect(self.music.play)
+        self.pause_btn.clicked.connect(self.music.pause)
+        self.stop_btn.clicked.connect(self.music.stop)
+        self.next_btn.clicked.connect(self.music.next)
+        for btn in (self.prev_btn, self.play_btn, self.pause_btn, self.stop_btn, self.next_btn):
+            btn_layout.addWidget(btn)
+        layout.addLayout(btn_layout)
+
+        self.current_track = QLabel("当前未播放")
+        self.current_track.setWordWrap(True)
+        layout.addWidget(self.current_track)
+
+        self.enable_checkbox = QCheckBox("启用背景音乐")
+        self.enable_checkbox.toggled.connect(self.on_enable_toggled)
+        layout.addWidget(self.enable_checkbox)
+
+        layout.addStretch()
+
+    def load_settings(self):
+        music_folder = self.settings.get('music_folder', '')
+        if music_folder and os.path.exists(music_folder):
+            self.folder_path.setText(music_folder)
+            self.music.set_playlist(music_folder)
+        self.music.set_volume(self.music.volume)
+        mode_map = {"order": 0, "shuffle": 1, "single": 2, "loop_one": 3}
+        current_mode = self.settings.get('music_mode', 'order')
+        self.mode_combo.setCurrentIndex(mode_map.get(current_mode, 0))
+        self.enable_checkbox.setChecked(self.music.enabled)
+
+    def select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "选择音乐文件夹")
+        if folder:
+            self.folder_path.setText(folder)
+            self.settings['music_folder'] = folder
+            self.save_callback()
+            self.music.set_playlist(folder)
+            if self.music.enabled and self.music.playlist:
+                self.music.play()
+
+    def on_mode_changed(self, index):
+        modes = ["order", "shuffle", "single", "loop_one"]
+        mode = modes[index]
+        self.music.set_mode(mode)
+        self.settings['music_mode'] = mode
+        self.save_callback()
+
+    def on_volume_changed(self, value):
+        vol = value / 100.0
+        self.music.set_volume(vol)
+        self.volume_label.setText(f"{value}%")
+        self.settings['music_volume'] = vol
+        self.save_callback()
+
+    def on_enable_toggled(self, checked):
+        self.music.enabled = checked
+        self.settings['music_enabled'] = checked
+        self.save_callback()
+        if checked and self.music.playlist:
+            self.music.play()
+        elif not checked:
+            self.music.stop()
+
+    def _check_music_state(self):
+        if self.music.enabled and self.music.playlist and not pygame.mixer.music.get_busy() and self.music.playing:
+            self.music.on_finished()
+        if self.music.playlist and 0 <= self.music.current_index < len(self.music.playlist):
+            file = self.music.playlist[self.music.current_index]
+            name = os.path.basename(file)
+            status = "播放中" if self.music.playing else "暂停"
+            self.current_track.setText(f"当前: {name} ({status})")
+        else:
+            self.current_track.setText("未选择音乐文件夹或列表为空")
+
+
+# ---------- 开机自启动面板 ----------
 class AutoStartPanel(QWidget):
     def __init__(self):
         super().__init__()
@@ -476,7 +606,7 @@ class AutoStartPanel(QWidget):
         btn_layout.addWidget(self.disable_btn)
         layout.addLayout(btn_layout)
 
-        info = QLabel("说明：开机自启动会在 Windows 启动时自动运行本程序。")
+        info = QLabel("说明：开机自启动会在 Windows 启动时自动运行本程序。\n程序安装在D盘时，自启动会稳定指向D盘程序，不受冰点还原影响。")
         info.setWordWrap(True)
         info.setStyleSheet("color: #9ca3af; font-size: 11px;")
         layout.addWidget(info)
@@ -506,24 +636,31 @@ class AutoStartPanel(QWidget):
             QMessageBox.information(self, "提示", "仅支持 Windows 系统")
             return
         try:
+            main_window = self.window()
+            target_path = None
+            if hasattr(main_window, 'settings'):
+                install_path = main_window.settings.get('install_path')
+                if install_path:
+                    exe_name = "智能抽号系统_v3.0_beta.exe"
+                    candidate = os.path.join(install_path, exe_name)
+                    if os.path.exists(candidate):
+                        target_path = candidate
+            if not target_path:
+                if getattr(sys, 'frozen', False):
+                    target_path = sys.executable
+                else:
+                    target_path = os.path.abspath(sys.argv[0])
+            
             shell = Dispatch("WScript.Shell")
-
-            if getattr(sys, 'frozen', False):
-                target_path = sys.executable
-            else:
-                target_path = os.path.abspath(sys.argv[0])
-
             shortcut_path = self.get_shortcut_path()
             if os.path.exists(shortcut_path):
                 os.remove(shortcut_path)
-
             shortcut = shell.CreateShortCut(shortcut_path)
             shortcut.TargetPath = target_path
             shortcut.WorkingDirectory = os.path.dirname(target_path)
             shortcut.IconLocation = target_path
             shortcut.Save()
-
-            QMessageBox.information(self, "成功", "已设置开机自启动")
+            QMessageBox.information(self, "成功", f"已设置开机自启动，目标程序：{target_path}")
             self.check_status()
         except PermissionError:
             QMessageBox.critical(self, "权限不足", "请以管理员身份运行本程序后重试")

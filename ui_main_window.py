@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QStackedWidget, QLabel, QPushButton, QFrame,
                                QMenuBar, QMenu, QDialog, QTextBrowser, QMessageBox)
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from ui_draw_page import DrawPage
 from ui_settings_page import SettingsPage
 from core import DrawCore
@@ -29,23 +30,64 @@ class MainWindow(QMainWindow):
         self.music.file = self.settings.get('music_file', '')
         self.music.volume = self.settings.get('music_volume', 0.5)
         self.setup_ui()
-        self.setup_menu_bar()          # 新增：创建菜单栏
+        self.setup_menu_bar()
         self.setup_connections()
+        # 检测并保存安装路径（关键：解决冰点还原下自启动路径错误问题）
+        self._detect_and_save_install_path()
+        # 确保桌面快捷方式指向安装路径
         self._ensure_desktop_shortcut()
 
-    # ---------- 桌面快捷方式（绕过冰点还原） ----------
+    # ---------- 安装路径检测与保存 ----------
+    def _detect_and_save_install_path(self):
+        """检测当前程序所在目录，并保存为安装路径（如果尚未保存）"""
+        # 获取当前运行的可执行文件路径
+        if getattr(sys, 'frozen', False):
+            current_exe = sys.executable
+        else:
+            current_exe = os.path.abspath(sys.argv[0])
+        current_dir = os.path.dirname(current_exe)
+
+        # 如果配置中没有 install_path，则写入
+        if 'install_path' not in self.settings:
+            self.settings['install_path'] = current_dir
+            self.save_settings()
+            # 可选：静默保存，不打扰用户
+        else:
+            saved_path = self.settings['install_path']
+            if saved_path != current_dir:
+                # 若当前运行路径与保存的不一致，可能用户从非安装目录启动了程序
+                # 此时仍使用保存的路径进行后续操作，但可以控制台输出警告
+                print(f"警告：程序运行路径({current_dir})与安装路径({saved_path})不一致，开机自启动将使用安装路径。")
+
+    # ---------- 桌面快捷方式（强制使用安装路径） ----------
     def _ensure_desktop_shortcut(self):
+        """在桌面创建指向安装目录下 exe 的快捷方式，绕过冰点还原"""
         if not HAS_WIN32COM:
             return
         try:
+            # 从配置中获取安装路径
+            install_path = self.settings.get('install_path')
+            if install_path:
+                exe_name = "智能抽号系统_v3.0_beta.exe"
+                target = os.path.join(install_path, exe_name)
+                if not os.path.exists(target):
+                    # 如果安装目录下找不到 exe，回退到当前运行路径
+                    if getattr(sys, 'frozen', False):
+                        target = sys.executable
+                    else:
+                        target = os.path.abspath(sys.argv[0])
+            else:
+                # 没有保存安装路径，回退
+                if getattr(sys, 'frozen', False):
+                    target = sys.executable
+                else:
+                    target = os.path.abspath(sys.argv[0])
+
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             if not os.path.exists(desktop):
                 desktop = os.path.join(os.path.expanduser("~"), "桌面")
             shortcut_path = os.path.join(desktop, "智能抽号系统.lnk")
-            if getattr(sys, 'frozen', False):
-                target = sys.executable
-            else:
-                target = os.path.abspath(sys.argv[0])
+
             if os.path.exists(shortcut_path):
                 os.remove(shortcut_path)
             shell = Dispatch("WScript.Shell")
@@ -55,7 +97,7 @@ class MainWindow(QMainWindow):
             shortcut.IconLocation = target
             shortcut.Save()
         except Exception:
-            pass
+            pass  # 静默失败，不影响主程序
 
     # ---------- 设置加载/保存 ----------
     def load_settings(self):
@@ -91,7 +133,6 @@ class MainWindow(QMainWindow):
     # ---------- 菜单栏 ----------
     def setup_menu_bar(self):
         menubar = self.menuBar()
-        # 帮助菜单
         help_menu = menubar.addMenu("帮助")
         about_action = help_menu.addAction("关于")
         about_action.triggered.connect(self.show_about)
@@ -107,9 +148,8 @@ class MainWindow(QMainWindow):
 
     def show_changelog(self):
         """读取外部 CHANGELOG.md 文件并显示"""
-        # 确定文件路径（支持打包后的 exe）
         if getattr(sys, 'frozen', False):
-            base_path = sys._MEIPASS   # PyInstaller 临时目录
+            base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
         changelog_path = os.path.join(base_path, "CHANGELOG.md")
@@ -121,19 +161,18 @@ class MainWindow(QMainWindow):
         if os.path.exists(changelog_path):
             with open(changelog_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            # 简单的 Markdown 支持（标题、列表等）
             text_browser.setMarkdown(content)
         else:
             text_browser.setPlainText("未找到 CHANGELOG.md 文件，请从项目主页查看更新记录。")
         layout.addWidget(text_browser)
         dialog.exec_()
 
-    # ---------- UI 布局（与之前相同） ----------
+    # ---------- 主界面布局 ----------
     def setup_ui(self):
         self.setWindowTitle("智能抽号系统 v3.0 - PySide6 完全版")
         self.resize(1300, 850)
         self.setMinimumSize(1100, 700)
-
+        self.setWindowIcon(QIcon("app_icon.ico"))
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)

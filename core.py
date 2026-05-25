@@ -1,14 +1,16 @@
+# core.py
 import random
 from datetime import datetime
 from typing import List
 import json
 import os
-from PySide6.QtWidgets import QMessageBox  # 新增导入
+from PySide6.QtWidgets import QMessageBox
 
 class DrawCore:
     def __init__(self):
-        self.students = []
-        self.random_permutation = []
+        self.students = []                # 原始完整学生列表（永不修改）
+        self.available_students = []      # 可重复+排除模式下的剩余学生列表
+        self.random_permutation = []      # 不重复模式下的预随机排列
         self.current_permutation_index = 0
         self.draw_history = []
         self.student_stats = {}
@@ -28,6 +30,7 @@ class DrawCore:
 
     def load_students(self, students: List[str]):
         self.students = students.copy()
+        self.available_students = students.copy()
         self.generate_random_permutation()
 
     def generate_random_permutation(self):
@@ -73,7 +76,6 @@ class DrawCore:
             self.generate_random_permutation()
         remaining = len(self.random_permutation) - self.current_permutation_index
         if remaining < count:
-            # 弹出提示询问是否重置
             if parent_window:
                 ret = QMessageBox.question(parent_window, "提示", f"剩余人数不足 ({remaining}/{count})，是否重新生成随机排列？",
                                           QMessageBox.Yes | QMessageBox.No)
@@ -83,7 +85,6 @@ class DrawCore:
                 else:
                     return []
             else:
-                # 没有父窗口时，默认自动重置（保持兼容）
                 self.reset()
                 remaining = len(self.random_permutation)
             if remaining < count:
@@ -98,33 +99,41 @@ class DrawCore:
         return selected
 
     def _draw_repeat_exclude(self, count: int, parent_window=None) -> List[str]:
+        """可重复+排除模式：使用 available_students 作为剩余池"""
         if not self.students:
             return []
-        if len(self.students) < count:
+        # 确保 available_students 不为空（若为空，提示重置）
+        if not self.available_students:
             if parent_window:
-                ret = QMessageBox.question(parent_window, "提示", f"剩余学生不足 ({len(self.students)}/{count})，是否重置学生列表？",
+                ret = QMessageBox.question(parent_window, "提示", "所有学生已被抽完，是否重置？",
                                           QMessageBox.Yes | QMessageBox.No)
                 if ret == QMessageBox.Yes:
-                    # 重置学生列表（需要从原始名单恢复？这里简单起见重新生成一次）
-                    # 注意：重置会丢失之前的排除记录。这里我们重新从存档恢复原始名单太复杂，简单提示无法自动重置。
-                    # 为了简易，我们直接返回空，并提示用户手动重置。
-                    QMessageBox.information(parent_window, "提示", "请手动重置记录或添加学生")
-                    return []
+                    self.reset_available_students()
                 else:
                     return []
             else:
+                self.reset_available_students()
+            if not self.available_students:
                 return []
-        available = self.students.copy()
+        if len(self.available_students) < count:
+            if parent_window:
+                ret = QMessageBox.question(parent_window, "提示", f"剩余学生不足 ({len(self.available_students)}/{count})，是否重置？",
+                                          QMessageBox.Yes | QMessageBox.No)
+                if ret == QMessageBox.Yes:
+                    self.reset_available_students()
+                else:
+                    # 抽走剩余的全部
+                    count = len(self.available_students)
+            else:
+                self.reset_available_students()
+        # 从 available_students 中随机抽取并移除
         selected = []
-        for i in range(count):
-            student = random.choice(available)
+        for i in range(min(count, len(self.available_students))):
+            idx = random.randrange(len(self.available_students))
+            student = self.available_students.pop(idx)
             selected.append(student)
-            available.remove(student)
-        for stu in selected:
-            if stu in self.students:
-                self.students.remove(stu)
-        self.generate_random_permutation()
         self._record_draw(selected)
+        # 注意：不修改 self.students
         return selected
 
     def _draw_repeat_include(self, count: int) -> List[str]:
@@ -141,11 +150,17 @@ class DrawCore:
         self.total_draws_count += len(selected)
 
     def reset(self):
+        """完全重置：清空历史、统计，恢复不重复模式的排列，恢复可重复+排除模式的剩余池"""
         self.draw_history.clear()
         self.student_stats.clear()
         self.total_draws_count = 0
         self.current_permutation_index = 0
         self.generate_random_permutation()
+        self.reset_available_students()
+
+    def reset_available_students(self):
+        """重置可重复+排除模式下的剩余学生池（为原始学生列表的副本）"""
+        self.available_students = self.students.copy()
 
     # ---------- 存档功能 ----------
     def save_archive(self):
@@ -166,7 +181,8 @@ class DrawCore:
             "draw_history": self.draw_history,
             "student_stats": self.student_stats,
             "allow_repeat": self.allow_repeat,
-            "exclude_after_draw": self.exclude_after_draw
+            "exclude_after_draw": self.exclude_after_draw,
+            "available_students": self.available_students
         }
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -179,6 +195,7 @@ class DrawCore:
         self.current_permutation_index = data["current_permutation_index"]
         if "students" in data:
             self.students = data["students"]
+            self.available_students = data.get("available_students", self.students.copy())
         if "cheat_commands" in data:
             self.cheat_commands = data["cheat_commands"]
         if "yj_mode" in data:
@@ -370,7 +387,7 @@ class DrawCore:
         info += f"未抽取学生: {len(self.students) - len(self.student_stats)}\n"
         info += f"随机排列列表长度: {len(self.random_permutation) if self.random_permutation else 0}\n"
         info += f"当前抽取位置: {self.current_permutation_index}\n"
-        info += f"剩余学号: {len(self.random_permutation) - self.current_permutation_index if self.random_permutation else 0}\n\n"
+        info += f"剩余学号(不重复模式): {len(self.random_permutation) - self.current_permutation_index if self.random_permutation else 0}\n\n"
         info += "抽取频率排行:\n" + "-"*40 + "\n"
         sorted_stats = sorted(self.student_stats.items(), key=lambda x: x[1], reverse=True)
         for student, count in sorted_stats[:15]:
@@ -416,12 +433,15 @@ class DrawCore:
         new_num = max_num + 1
         new_stu = f"{new_num:02d}.({name})"
         self.students.append(new_stu)
+        self.available_students.append(new_stu)
         self.generate_random_permutation()
         return new_stu
 
     def delete_student(self, student: str) -> bool:
         if student in self.students:
             self.students.remove(student)
+            if student in self.available_students:
+                self.available_students.remove(student)
             self.generate_random_permutation()
             return True
         return False
@@ -434,6 +454,10 @@ class DrawCore:
             new_stu = new_name
         idx = self.students.index(old_student)
         self.students[idx] = new_stu
+        # 同步更新 available_students
+        if old_student in self.available_students:
+            idx2 = self.available_students.index(old_student)
+            self.available_students[idx2] = new_stu
         self.generate_random_permutation()
         return new_stu
 
