@@ -1,9 +1,22 @@
+# ui_components.py
 from PySide6.QtWidgets import QFrame, QLabel, QPushButton, QGraphicsDropShadowEffect
-from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, Property
+from PySide6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect
 from PySide6.QtGui import QColor
 
+class RoundShadowWidget(QFrame):
+    """圆角阴影容器 (可选，未在主界面使用但保留)"""
+    def __init__(self, parent=None, radius=10, color="#2a2b3c"):
+        super().__init__(parent)
+        self.setObjectName("RoundShadow")
+        self.setStyleSheet(f"#RoundShadow {{ background-color: {color}; border-radius: {radius}px; }}")
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 60))
+        self.setGraphicsEffect(shadow)
+
 class AnimatedButton(QPushButton):
-    """带动画的按钮"""
+    """带动画的按钮 - 修复悬停缩放漂移问题"""
     def __init__(self, text="", parent=None, bg_color="#3b82f6", hover_color="#2563eb"):
         super().__init__(text, parent)
         self.bg_color = bg_color
@@ -22,26 +35,53 @@ class AnimatedButton(QPushButton):
             QPushButton:hover {{
                 background-color: {hover_color};
             }}
+            QPushButton:pressed {{
+                background-color: {self.darken_color(hover_color)};
+            }}
         """)
+        # 记录原始大小
+        self.original_geometry = None
         self._animation = QPropertyAnimation(self, b"geometry")
         self._animation.setDuration(100)
         self._animation.setEasingCurve(QEasingCurve.OutCubic)
 
+    def darken_color(self, color):
+        if color.startswith('#'):
+            r = int(color[1:3], 16)
+            g = int(color[3:5], 16)
+            b = int(color[5:7], 16)
+            r = max(0, r - 30)
+            g = max(0, g - 30)
+            b = max(0, b - 30)
+            return f"#{r:02x}{g:02x}{b:02x}"
+        return color
+
+    def showEvent(self, event):
+        """确保在首次显示时记录原始几何"""
+        super().showEvent(event)
+        if self.original_geometry is None:
+            self.original_geometry = self.geometry()
+
     def enterEvent(self, event):
-        geo = self.geometry()
-        self._animation.setStartValue(geo)
-        geo.setHeight(geo.height() + 2)
-        geo.setWidth(geo.width() + 5)
-        self._animation.setEndValue(geo)
+        if self.original_geometry is None:
+            self.original_geometry = self.geometry()
+        # 基于原始几何计算放大后的矩形
+        enlarged = QRect(
+            self.original_geometry.x() - 2,      # 向左偏移2，保持中心
+            self.original_geometry.y() - 1,
+            self.original_geometry.width() + 5,
+            self.original_geometry.height() + 2
+        )
+        self._animation.setStartValue(self.geometry())
+        self._animation.setEndValue(enlarged)
         self._animation.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        geo = self.geometry()
-        self._animation.setStartValue(geo)
-        geo.setHeight(geo.height() - 2)
-        geo.setWidth(geo.width() - 5)
-        self._animation.setEndValue(geo)
+        if self.original_geometry is None:
+            self.original_geometry = self.geometry()
+        self._animation.setStartValue(self.geometry())
+        self._animation.setEndValue(self.original_geometry)
         self._animation.start()
         super().leaveEvent(event)
 

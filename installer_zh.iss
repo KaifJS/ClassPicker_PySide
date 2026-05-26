@@ -1,18 +1,18 @@
-; installer_zh.iss - 智能抽号系统 v3.0.2 安装脚本（绝对路径图标）
+; installer_zh.iss - 智能抽号系统 v3.0.3 安装脚本（绝对路径图标）
 [Setup]
 AppName=智能抽号系统 v3.0 Beta
-AppVersion=3.0.2
+AppVersion=3.0.3
 AppPublisher=开方居士
-AppPublisherURL=https://github.com/你的用户名/random-draw-pyside6
-AppSupportURL=https://github.com/你的用户名/random-draw-pyside6
-AppUpdatesURL=https://github.com/你的用户名/random-draw-pyside6
+AppPublisherURL=https://github.com/KaifJS/ClassPicker_PySide
+AppSupportURL=https://github.com/KaifJS/ClassPicker_PySide
+AppUpdatesURL=https://github.com/KaifJS/ClassPicker_PySide
 DefaultDirName={code:GetDefaultDir}
 DefaultGroupName=智能抽号系统
 UninstallDisplayIcon={app}\智能抽号系统_v3.0_beta.exe
 Compression=lzma2
 SolidCompression=yes
 OutputDir=.
-OutputBaseFilename=智能抽号系统_Setup_3.0.2
+OutputBaseFilename=智能抽号系统_Setup_3.0.3
 WizardStyle=modern
 PrivilegesRequired=admin
 AllowNoIcons=yes
